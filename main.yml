@@ -1,0 +1,32 @@
+---
+- hosts: all
+  tasks:
+    - name: Check to ensure this is only run on a single host
+      fail: msg="Single host check failed."
+      when: play_hosts|length != 1
+
+- hosts: all
+  become: yes
+  become_user: root
+  gather_facts: yes
+
+  roles:
+    - selinux
+    - database
+    - inprod-bow
+    - geerlingguy.firewall
+
+  vars:    
+    # iptables are used instead of firewalld, so this needs to be disabled
+    firewall_disable_firewalld: true
+    firewall_allowed_tcp_ports:
+      - "22"
+      - "80"
+      - "443"
+    firewall_additional_rules:
+      # Set rate limits
+      - "iptables -I INPUT -m hashlimit -m tcp -p tcp --dport 80 --hashlimit-above 100/sec --hashlimit-mode srcip --hashlimit-htable-expire 600000 --hashlimit-htable-gcinterval 1000 --hashlimit-name http_rate -m state --state NEW -j DROP"
+      - "iptables -I INPUT -m hashlimit -m tcp -p tcp --dport 443 --hashlimit-above 100/sec --hashlimit-mode srcip --hashlimit-htable-expire 600000 --hashlimit-htable-gcinterval 1000 --hashlimit-name https_rate -m state --state NEW -j DROP"
+      # accept postgres for internal IP address range
+      - "iptables -A INPUT -p tcp --dport 5432 -s {{ internal_ip_range }} -j ACCEPT"
+

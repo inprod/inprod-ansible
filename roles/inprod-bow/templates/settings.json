@@ -1,0 +1,18 @@
+{
+  "database": {
+    "HOST": "{{ inprod_database }}",
+    "NAME": "{{ inprod_database_name }}",
+    "USER": "{{ inprod_database_user }}",
+    "PASSWORD": "{{ inprod_database_password }}"
+  },
+  "license": "{{ inprod_license_key }}",
+  "SECRET_KEY": "zz5^5+_poreuz^)t9-h1_5+7t@ahr=k&1df-rjky#d&47%isj%",
+  "SCHEMA_SIZE_MB": {{ inprod_schema_size_mb }},
+
+  "EMAIL_FROM": "no_reply@{{ inprod_email_domain }}",
+  "EMAIL_HOST": "{{ inprod_email_host }}",
+  "EMAIL_PORT": {{ inprod_email_port }},
+  "EMAIL_HOST_USER": "{{ inprod_email_user }}",
+  "EMAIL_HOST_PASSWORD": "{{ inprod_email_password }}",
+  "EMAIL_USE_TLS" : true
+}

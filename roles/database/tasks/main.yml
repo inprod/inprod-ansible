@@ -1,0 +1,122 @@
+- hostname:
+    name: "{{ host_name }}"
+
+- name: upgrade all packages
+  yum:
+    name: '*'
+    state: latest
+    exclude: inprod-bow,inprod-ember
+
+- name: install centos-release-scl-rh
+  yum:
+    name: centos-release-scl-rh
+
+- name: install epel-release
+  yum:
+    name: epel-release
+    
+- name: install posgres
+  yum:
+    name:
+      - rh-postgresql10-postgresql-server
+      - python-psycopg2
+
+- name: Postgres systemd services
+  template:
+    src: templates/rh-postgresql10-postgresql.service.j2
+    dest: /etc/systemd/system/rh-postgresql10-postgresql.service
+    owner: root
+    group: root
+    mode: "u=rw,g=r,o=r"
+  notify: systemd reload
+
+- name: Create postgres data directory
+  file:
+    path: "{{ postgresql_mount_dir }}"
+    owner: "{{ postgresql_user }}"
+    group: "{{ postgresql_user }}"
+    mode: "0700"
+    recurse: no
+    state: directory
+
+- name: Create symbolic link for 32bit 
+  file:
+    src: "/opt/rh/rh-postgresql10/root/usr/lib64/libpq.so.rh-postgresql10-5"
+    dest: "/usr/lib/libpq.so.rh-postgresql10-5"
+    state: link
+
+- name: Create symbolic link for 64bit 
+  file:
+    src: "/opt/rh/rh-postgresql10/root/usr/lib64/libpq.so.rh-postgresql10-5"
+    dest: "/usr/lib64/libpq.so.rh-postgresql10-5"
+    state: link
+
+- name: Check if PostgreSQL database is initialized.
+  stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  register: pgdata_dir_version
+
+- name: Ensure PostgreSQL database is initialized.
+  command: "{{ postgresql_bin_path }}/initdb -D {{ postgresql_data_dir }}"
+  when: not pgdata_dir_version.stat.exists
+  become: true
+  become_user: "{{ postgresql_user }}"
+  become_method: sudo
+  # See: https://github.com/ansible/ansible/issues/16048#issuecomment-229012509
+  vars:
+    ansible_ssh_pipelining: true
+
+- name: Configure host based authentication (if entries are configured).
+  template:
+    src: "pg_hba.conf.j2"
+    dest: "{{ postgresql_data_dir }}/pg_hba.conf"
+    owner: "{{ postgresql_user }}"
+    group: "{{ postgresql_user }}"
+    mode: "0644"
+  notify: restart postgresql
+
+- name: start postgresql
+  service:
+    name: "rh-postgresql10-postgresql.service"
+    state: "started"
+    enabled: true
+
+- name: Create inprod database user, set MD5-hashed password, grant privs
+  postgresql_user:
+    name: "{{ inprod_database_user }}"
+    password: "{{ inprod_database_password }}"
+    role_attr_flags: CREATEDB,NOSUPERUSER
+    expires: "infinity"
+    login_user: "postgres"
+  become: true
+  become_method: sudo  
+  become_user: "{{ postgresql_user }}"
+
+- name: Ensure PostgreSQL databases are present.
+  postgresql_db:
+    name: "{{ inprod_database_name }}"
+    encoding: "UTF-8"
+    owner: "{{ inprod_database_user }}"
+  become: true
+  become_user: "{{ postgresql_user }}"
+  become_method: sudo
+
+- name: Postgres setting file, can only be updated once database as been init'ed
+  template:
+    src: "postgresql.conf.j2"
+    dest: "{{ postgresql_data_dir }}/postgresql.conf"
+    owner: "{{ postgresql_user }}"
+    group: "{{ postgresql_user }}"
+    mode: "0644"
+  notify: restart postgresql    
+
+#     - sefcontext:
+#         target: '{{ postgresql_mount_dir }}(/.*)?'
+#         setype: postgresql_db_t
+#         state: present        
+
+#     - name: SElinux config 2
+#       shell : semanage fcontext -a -t postgresql_db_t "{{ postgresql_mount_dir }}(/.*)?"
+
+# emanage fcontext -a -t postgresql_db_t "/mnt/postgres/pgsql(/.*)?"
+# semanage fcontext -a -t postgresql_db_t "/mnt/postgres/pgsql(/.*)?"

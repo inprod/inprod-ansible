@@ -1,0 +1,113 @@
+- hostname:
+    name: "{{ host_name }}"
+
+- name: upgrade all packages
+  yum:
+    name: '*'
+    state: latest
+    exclude: inprod-bow,inprod-ember
+
+- name: InProd yum repo
+  yum_repository:
+    baseurl: https://support.inprod.io/yum_repo/{{ inprod_yum_token }}
+    description: InProd production EL7 repo
+    file: InProd
+    gpgcheck: no
+    ip_resolve: '4'
+    name: InProd
+
+- name: install EPEL repo
+  yum:
+    name:
+      - epel-release
+    state: present
+
+- name: Install centos-release-scl repo for inprod for the postgres install
+  yum:
+    name: centos-release-scl-rh
+
+- name: Create the inprod user so the temp directory is created to remove Ansible warnings
+  user:
+    name: inprod
+    state: present
+    shell: /bin/bash
+    expires: -1
+    comment: InProd user created by Ansible
+    create_home: yes
+    system: yes
+
+- name: Install inprod-bow
+  yum:
+    name:
+      - inprod-bow
+      - inprod-ember
+    state: latest
+  register: runmigration
+
+- name: Bow settings file
+  template:
+    src: templates/settings.json
+    dest: /opt/inprod/settings.json
+    owner: inprod
+    group: inprod
+    mode: u=rw,g=r
+    force: yes
+    backup: yes
+  register: bowrestart
+
+- name: Stop inprod-bow service due to config file change
+  service:
+    name: inprod-bow.service
+    state: stopped
+    enabled: yes  
+  when: bowrestart.changed
+
+- name: stop local postgres server
+  # Do not want the local database server running
+  service:
+    name: rh-postgresql96-postgresql.service
+    state: stopped
+    enabled: no
+
+- name: Remove postgresql96 requirement and add 10
+  lineinfile: 
+    dest: /etc/systemd/system/inprod-bow.service 
+    regexp: 'Requires=rh-postgresql96'
+    line: "Requires=rh-postgresql10-postgresql.service"
+  notify: systemd reload
+
+- name: Create symbolic links for posrgres share libs
+  file:
+    src: "/opt/rh/rh-postgresql96/root/usr/lib64/libpq.so.rh-postgresql96-5"
+    dest: "{{ item }}"
+    state: link
+  with_items:
+    ["/usr/lib64/libpq.so.rh-postgresql96-5", "/usr/lib/libpq.so.rh-postgresql96-5"]
+
+- name: run migration steps
+  # Migration is only run when there is a package change, otherwise it will run every time.
+  # Do this manually as the processing delay can cause the service to fail
+  command:
+    argv:
+      - /opt/inprod/bow/bin/python
+      - /opt/inprod/bow/bin/inprod-admin.py
+      - migrate
+  become: yes
+  become_user: inprod
+  args:
+    chdir: /opt/inprod/bow
+  environment:
+    DJANGO_SETTINGS_MODULE: epsilon.settings
+  when: runmigration.changed
+
+- name: systemd reload to pickup changes
+  become: true
+  systemd:
+    daemon_reload: yes
+  when: runmigration.changed
+
+- name: start inprod-bow service
+  service:
+    name: inprod-bow.service
+    state: started
+    enabled: yes

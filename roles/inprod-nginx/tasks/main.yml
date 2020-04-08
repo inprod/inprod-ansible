@@ -1,0 +1,58 @@
+---
+
+- name: install EPL repo
+  yum:
+    name:
+      - epel-release
+    state: present
+
+- name: Installs nginx web server
+  yum: pkg=nginx state=installed update_cache=true
+  notify:
+    - start nginx
+
+- name: Nginx stub status page
+  template:
+    src: templates/nginx-stub_status.conf
+    dest: /etc/nginx/conf.d/nginx-stub_status.conf
+    owner: root
+    group: root
+    mode: "u=rw,g=r,o=r"
+  notify: restart nginx
+
+- name: Nginx site config
+  template:
+    src: templates/nginx-inprod.conf
+    dest: /etc/nginx/conf.d/nginx-inprod.conf
+    owner: root
+    group: root
+    mode: "u=rw,g=r,o=r"
+  notify: restart nginx
+
+- name: Creates letsencrypt directory
+  file:
+    path: /etc/letsencrypt/live/{{ inprod_domain }}
+    state: directory
+
+- name: letsencrypt cert
+  copy:
+    src: templates/{{ inprod_domain }}/{{item}}
+    dest: /etc/letsencrypt/live/{{ inprod_domain }}/{{ item }}          
+    owner: root
+    group: root
+    mode: "u=rw,g=r,o=r"
+  with_items:
+    ['fullchain.pem', 'privkey.pem']
+  notify: restart nginx
+
+- name: letsencrypt config
+  copy:
+    src: templates/{{item}}
+    dest: /etc/letsencrypt/{{item}}
+    owner: root
+    group: root
+    mode: "u=rw,g=r,o=r"
+  with_items:
+    ['options-ssl-nginx.conf', 'ssl-dhparams.pem']
+  notify: restart nginx
+
